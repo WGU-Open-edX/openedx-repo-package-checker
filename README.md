@@ -55,6 +55,11 @@ python check_packages.py --packages-file custom_packages.txt
 python check_packages.py --branches-file custom_branches.txt
 ```
 
+### Run Oct 2025 supply-chain-attacks-NPM-packages Check
+```bash
+python check_packages.py --packages-file supply-chain-attacks-NPM-packages.txt
+```
+
 The script will:
 1. Fetch repositories from the OpenEdx organization (all or specific repo)
 2. Check `package.json`, `package-lock.json`, and `yarn.lock` for the target packages
