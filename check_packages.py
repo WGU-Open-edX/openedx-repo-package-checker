@@ -43,7 +43,6 @@ def load_target_branches(config_path: str = None) -> List[str]:
 
 # GitHub API base URL
 GITHUB_API_BASE = "https://api.github.com"
-ORG_NAME = "openedx"
 
 # GitHub token (optional, for higher rate limits)
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
@@ -87,14 +86,14 @@ def get_all_repos(org: str) -> List[Dict]:
     return repos
 
 
-def get_repo_branches(repo_name: str) -> List[str]:
+def get_repo_branches(org: str, repo_name: str) -> List[str]:
     """Fetch all branches for a repository."""
     branches = []
     page = 1
     per_page = 100
 
     while True:
-        url = f"{GITHUB_API_BASE}/repos/{ORG_NAME}/{repo_name}/branches"
+        url = f"{GITHUB_API_BASE}/repos/{org}/{repo_name}/branches"
         params = {"page": page, "per_page": per_page}
 
         try:
@@ -117,12 +116,12 @@ def get_repo_branches(repo_name: str) -> List[str]:
     return branches
 
 
-def check_package_json(repo_name: str, branch: str, target_packages: List[str]) -> Dict[str, List[str]]:
+def check_package_json(org: str, repo_name: str, branch: str, target_packages: List[str]) -> Dict[str, List[str]]:
     """Check package.json for target packages."""
     found_packages = {}
 
     # Try to fetch package.json from root
-    url = f"https://raw.githubusercontent.com/{ORG_NAME}/{repo_name}/{branch}/package.json"
+    url = f"https://raw.githubusercontent.com/{org}/{repo_name}/{branch}/package.json"
 
     try:
         response = requests.get(url, timeout=10)
@@ -178,12 +177,12 @@ def check_package_json(repo_name: str, branch: str, target_packages: List[str]) 
     return found_packages
 
 
-def check_lock_files(repo_name: str, branch: str, target_packages: List[str]) -> Dict[str, List[str]]:
+def check_lock_files(org: str, repo_name: str, branch: str, target_packages: List[str]) -> Dict[str, List[str]]:
     """Check package-lock.json and yarn.lock for target packages."""
     found_packages = {}
 
     # Check package-lock.json
-    package_lock_url = f"https://raw.githubusercontent.com/{ORG_NAME}/{repo_name}/{branch}/package-lock.json"
+    package_lock_url = f"https://raw.githubusercontent.com/{org}/{repo_name}/{branch}/package-lock.json"
     try:
         response = requests.get(package_lock_url, timeout=10)
         if response.status_code == 200:
@@ -244,7 +243,7 @@ def check_lock_files(repo_name: str, branch: str, target_packages: List[str]) ->
         pass
 
     # Check yarn.lock
-    yarn_lock_url = f"https://raw.githubusercontent.com/{ORG_NAME}/{repo_name}/{branch}/yarn.lock"
+    yarn_lock_url = f"https://raw.githubusercontent.com/{org}/{repo_name}/{branch}/yarn.lock"
     try:
         response = requests.get(yarn_lock_url, timeout=10)
         if response.status_code == 200:
@@ -296,7 +295,8 @@ def check_lock_files(repo_name: str, branch: str, target_packages: List[str]) ->
 def main():
     """Main function to orchestrate the package checking."""
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description="Check OpenEdx repositories for specific packages")
+    parser = argparse.ArgumentParser(description="Check GitHub repositories for specific packages")
+    parser.add_argument('--org', type=str, default='openedx', help='GitHub organization name (default: openedx)')
     parser.add_argument('--repo', type=str, help='Specific repository name to check (e.g., "edx-platform"). If not provided, checks all repositories.')
     parser.add_argument('--packages-file', type=str, help='Path to custom target packages file (default: target_packages.txt)')
     parser.add_argument('--branches-file', type=str, help='Path to custom target branches file (default: target_branches.txt)')
@@ -305,10 +305,12 @@ def main():
     # Load target packages and branches from specified files or defaults
     TARGET_PACKAGES = load_target_packages(args.packages_file)
     TARGET_BRANCHES = load_target_branches(args.branches_file)
+    ORG_NAME = args.org
 
     print("=" * 80)
-    print("OpenEdx Repository Package Checker")
+    print("GitHub Repository Package Checker")
     print("=" * 80)
+    print(f"\nOrganization: {ORG_NAME}")
     print("\nTarget packages:")
     for pkg in TARGET_PACKAGES:
         print(f"  - {pkg}")
@@ -362,7 +364,7 @@ def main():
 
         if TARGET_BRANCHES:
             # Get all branches for the repo
-            all_branches = get_repo_branches(repo_name)
+            all_branches = get_repo_branches(ORG_NAME, repo_name)
 
             # Check which target branches exist in this repo
             for target_branch in TARGET_BRANCHES:
@@ -380,8 +382,8 @@ def main():
         repo_found_packages = {}
         for branch in branches_to_check:
             # Merge results from package.json and lock files
-            found_json = check_package_json(repo_name, branch, TARGET_PACKAGES)
-            found_lock = check_lock_files(repo_name, branch, TARGET_PACKAGES)
+            found_json = check_package_json(ORG_NAME, repo_name, branch, TARGET_PACKAGES)
+            found_lock = check_lock_files(ORG_NAME, repo_name, branch, TARGET_PACKAGES)
 
             # Combine results
             found = {}
