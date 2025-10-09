@@ -440,7 +440,7 @@ def main():
     errors_file = os.path.join(results_dir, "errors.txt")
     warnings_file = os.path.join(results_dir, "warnings.txt")
 
-    # Collect errors (exact version mismatches) and warnings (any version installed)
+    # Collect errors (exact version matches - vulnerable) and warnings (same package, different version)
     errors = []
     warnings = []
 
@@ -451,8 +451,8 @@ def main():
         for branch, packages in result['branches'].items():
             for pkg_name, versions in packages.items():
                 for version_info in versions:
-                    if not version_info['exact_match']:
-                        # Error: version doesn't match exactly
+                    if version_info['exact_match']:
+                        # Error: exact version match found (vulnerable package)
                         errors.append({
                             "repo": repo_name,
                             "url": repo_url,
@@ -463,7 +463,7 @@ def main():
                             "source": version_info['source']
                         })
                     else:
-                        # Warning: package is installed (with matching version)
+                        # Warning: same package name but different version
                         warnings.append({
                             "repo": repo_name,
                             "url": repo_url,
@@ -477,7 +477,7 @@ def main():
     # Write errors file
     with open(errors_file, 'w') as f:
         f.write("=" * 80 + "\n")
-        f.write("ERRORS: Repositories with version mismatches\n")
+        f.write("ERRORS: Repositories with exact vulnerable package matches\n")
         f.write("=" * 80 + "\n\n")
 
         if errors:
@@ -490,14 +490,14 @@ def main():
                 f.write(f"Installed Version: {error['installed_version']}\n")
                 f.write("-" * 80 + "\n\n")
 
-            f.write(f"Total version mismatches: {len(errors)}\n")
+            f.write(f"Total exact vulnerable package matches: {len(errors)}\n")
         else:
-            f.write("No version mismatches found.\n")
+            f.write("No exact vulnerable package matches found.\n")
 
     # Write warnings file
     with open(warnings_file, 'w') as f:
         f.write("=" * 80 + "\n")
-        f.write("WARNINGS: Repositories with matching package versions\n")
+        f.write("WARNINGS: Repositories with same package but different version\n")
         f.write("=" * 80 + "\n\n")
 
         if warnings:
@@ -510,9 +510,9 @@ def main():
                 f.write(f"Installed Version: {warning['installed_version']}\n")
                 f.write("-" * 80 + "\n\n")
 
-            f.write(f"Total matching packages: {len(warnings)}\n")
+            f.write(f"Total packages with different versions: {len(warnings)}\n")
         else:
-            f.write("No matching packages found.\n")
+            f.write("No packages with different versions found.\n")
 
     print(f"\n📄 Reports generated:")
     print(f"   Errors: {errors_file}")
