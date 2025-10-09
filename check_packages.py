@@ -11,10 +11,11 @@ import argparse
 from typing import List, Dict, Set
 
 # Read packages from target_packages.txt
-def load_target_packages() -> List[str]:
-    """Load target packages from target_packages.txt."""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(script_dir, "target_packages.txt")
+def load_target_packages(config_path: str = None) -> List[str]:
+    """Load target packages from target_packages.txt or specified file."""
+    if config_path is None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        config_path = os.path.join(script_dir, "target_packages.txt")
 
     packages = []
     if os.path.exists(config_path):
@@ -25,10 +26,11 @@ def load_target_packages() -> List[str]:
                     packages.append(line)
     return packages
 
-def load_target_branches() -> List[str]:
-    """Load target branches from target_branches.txt."""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(script_dir, "target_branches.txt")
+def load_target_branches(config_path: str = None) -> List[str]:
+    """Load target branches from target_branches.txt or specified file."""
+    if config_path is None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        config_path = os.path.join(script_dir, "target_branches.txt")
 
     branches = []
     if os.path.exists(config_path):
@@ -38,9 +40,6 @@ def load_target_branches() -> List[str]:
                 if line and not line.startswith('#'):
                     branches.append(line)
     return branches
-
-TARGET_PACKAGES = load_target_packages()
-TARGET_BRANCHES = load_target_branches()
 
 # GitHub API base URL
 GITHUB_API_BASE = "https://api.github.com"
@@ -118,7 +117,7 @@ def get_repo_branches(repo_name: str) -> List[str]:
     return branches
 
 
-def check_package_json(repo_name: str, branch: str) -> Dict[str, List[str]]:
+def check_package_json(repo_name: str, branch: str, target_packages: List[str]) -> Dict[str, List[str]]:
     """Check package.json for target packages."""
     found_packages = {}
 
@@ -138,7 +137,7 @@ def check_package_json(repo_name: str, branch: str) -> Dict[str, List[str]]:
                 all_deps.update(package_data.get("devDependencies", {}))
                 all_deps.update(package_data.get("peerDependencies", {}))
 
-                for target_pkg in TARGET_PACKAGES:
+                for target_pkg in target_packages:
                     # Handle both formats: color@5.0.1 and @scope/package@5.0.1
                     if target_pkg.startswith("@"):
                         # Scoped package: @scope/package@version
@@ -179,7 +178,7 @@ def check_package_json(repo_name: str, branch: str) -> Dict[str, List[str]]:
     return found_packages
 
 
-def check_lock_files(repo_name: str, branch: str) -> Dict[str, List[str]]:
+def check_lock_files(repo_name: str, branch: str, target_packages: List[str]) -> Dict[str, List[str]]:
     """Check package-lock.json and yarn.lock for target packages."""
     found_packages = {}
 
@@ -195,7 +194,7 @@ def check_lock_files(repo_name: str, branch: str) -> Dict[str, List[str]]:
                 packages = lock_data.get("packages", {})
                 dependencies = lock_data.get("dependencies", {})
 
-                for target_pkg in TARGET_PACKAGES:
+                for target_pkg in target_packages:
                     # Handle both formats: color@5.0.1 and @scope/package@5.0.1
                     if target_pkg.startswith("@"):
                         # Scoped package: @scope/package@version
@@ -251,7 +250,7 @@ def check_lock_files(repo_name: str, branch: str) -> Dict[str, List[str]]:
         if response.status_code == 200:
             yarn_content = response.text
 
-            for target_pkg in TARGET_PACKAGES:
+            for target_pkg in target_packages:
                 # Handle both formats: color@5.0.1 and @scope/package@5.0.1
                 if target_pkg.startswith("@"):
                     # Scoped package: @scope/package@version
@@ -299,7 +298,13 @@ def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Check OpenEdx repositories for specific packages")
     parser.add_argument('--repo', type=str, help='Specific repository name to check (e.g., "edx-platform"). If not provided, checks all repositories.')
+    parser.add_argument('--packages-file', type=str, help='Path to custom target packages file (default: target_packages.txt)')
+    parser.add_argument('--branches-file', type=str, help='Path to custom target branches file (default: target_branches.txt)')
     args = parser.parse_args()
+
+    # Load target packages and branches from specified files or defaults
+    TARGET_PACKAGES = load_target_packages(args.packages_file)
+    TARGET_BRANCHES = load_target_branches(args.branches_file)
 
     print("=" * 80)
     print("OpenEdx Repository Package Checker")
@@ -375,8 +380,8 @@ def main():
         repo_found_packages = {}
         for branch in branches_to_check:
             # Merge results from package.json and lock files
-            found_json = check_package_json(repo_name, branch)
-            found_lock = check_lock_files(repo_name, branch)
+            found_json = check_package_json(repo_name, branch, TARGET_PACKAGES)
+            found_lock = check_lock_files(repo_name, branch, TARGET_PACKAGES)
 
             # Combine results
             found = {}
@@ -437,12 +442,12 @@ def main():
     # Create results directory if it doesn't exist
     os.makedirs(results_dir, exist_ok=True)
 
-    errors_file = os.path.join(results_dir, "errors.txt")
-    warnings_file = os.path.join(results_dir, "warnings.txt")
+    exact_matches_file = os.path.join(results_dir, "exact_matches.txt")
+    partial_matches_file = os.path.join(results_dir, "partial_matches.txt")
 
-    # Collect errors (exact version matches - vulnerable) and warnings (same package, different version)
-    errors = []
-    warnings = []
+    # Collect exact matches (same package, same version) and partial matches (same package, different version)
+    exact_matches = []
+    partial_matches = []
 
     for result in results:
         repo_name = result['repo']
@@ -452,8 +457,8 @@ def main():
             for pkg_name, versions in packages.items():
                 for version_info in versions:
                     if version_info['exact_match']:
-                        # Error: exact version match found (vulnerable package)
-                        errors.append({
+                        # Exact match: same package name and version
+                        exact_matches.append({
                             "repo": repo_name,
                             "url": repo_url,
                             "branch": branch,
@@ -463,8 +468,8 @@ def main():
                             "source": version_info['source']
                         })
                     else:
-                        # Warning: same package name but different version
-                        warnings.append({
+                        # Partial match: same package name but different version
+                        partial_matches.append({
                             "repo": repo_name,
                             "url": repo_url,
                             "branch": branch,
@@ -474,49 +479,49 @@ def main():
                             "source": version_info['source']
                         })
 
-    # Write errors file
-    with open(errors_file, 'w') as f:
+    # Write exact matches file
+    with open(exact_matches_file, 'w') as f:
         f.write("=" * 80 + "\n")
-        f.write("ERRORS: Repositories with exact vulnerable package matches\n")
+        f.write("EXACT MATCHES: Repositories with exact package and version matches\n")
         f.write("=" * 80 + "\n\n")
 
-        if errors:
-            for error in errors:
-                f.write(f"Repository: {error['repo']}\n")
-                f.write(f"URL: {error['url']}\n")
-                f.write(f"Branch: {error['branch']}\n")
-                f.write(f"Package: {error['package']} ({error['source']})\n")
-                f.write(f"Target Version: {error['target_version']}\n")
-                f.write(f"Installed Version: {error['installed_version']}\n")
+        if exact_matches:
+            for match in exact_matches:
+                f.write(f"Repository: {match['repo']}\n")
+                f.write(f"URL: {match['url']}\n")
+                f.write(f"Branch: {match['branch']}\n")
+                f.write(f"Package: {match['package']} ({match['source']})\n")
+                f.write(f"Target Version: {match['target_version']}\n")
+                f.write(f"Installed Version: {match['installed_version']}\n")
                 f.write("-" * 80 + "\n\n")
 
-            f.write(f"Total exact vulnerable package matches: {len(errors)}\n")
+            f.write(f"Total exact matches: {len(exact_matches)}\n")
         else:
-            f.write("No exact vulnerable package matches found.\n")
+            f.write("No exact matches found.\n")
 
-    # Write warnings file
-    with open(warnings_file, 'w') as f:
+    # Write partial matches file
+    with open(partial_matches_file, 'w') as f:
         f.write("=" * 80 + "\n")
-        f.write("WARNINGS: Repositories with same package but different version\n")
+        f.write("PARTIAL MATCHES: Repositories with same package but different version\n")
         f.write("=" * 80 + "\n\n")
 
-        if warnings:
-            for warning in warnings:
-                f.write(f"Repository: {warning['repo']}\n")
-                f.write(f"URL: {warning['url']}\n")
-                f.write(f"Branch: {warning['branch']}\n")
-                f.write(f"Package: {warning['package']} ({warning['source']})\n")
-                f.write(f"Target Version: {warning['target_version']}\n")
-                f.write(f"Installed Version: {warning['installed_version']}\n")
+        if partial_matches:
+            for match in partial_matches:
+                f.write(f"Repository: {match['repo']}\n")
+                f.write(f"URL: {match['url']}\n")
+                f.write(f"Branch: {match['branch']}\n")
+                f.write(f"Package: {match['package']} ({match['source']})\n")
+                f.write(f"Target Version: {match['target_version']}\n")
+                f.write(f"Installed Version: {match['installed_version']}\n")
                 f.write("-" * 80 + "\n\n")
 
-            f.write(f"Total packages with different versions: {len(warnings)}\n")
+            f.write(f"Total partial matches: {len(partial_matches)}\n")
         else:
-            f.write("No packages with different versions found.\n")
+            f.write("No partial matches found.\n")
 
     print(f"\n📄 Reports generated:")
-    print(f"   Errors: {errors_file}")
-    print(f"   Warnings: {warnings_file}")
+    print(f"   Exact matches: {exact_matches_file}")
+    print(f"   Partial matches: {partial_matches_file}")
 
 
 if __name__ == "__main__":

@@ -46,6 +46,15 @@ python check_packages.py
 python check_packages.py --repo edx-platform
 ```
 
+### Use custom configuration files:
+```bash
+# Custom packages file
+python check_packages.py --packages-file custom_packages.txt
+
+# Custom branches file
+python check_packages.py --branches-file custom_branches.txt
+```
+
 The script will:
 1. Fetch repositories from the OpenEdx organization (all or specific repo)
 2. Check `package.json`, `package-lock.json`, and `yarn.lock` for the target packages
@@ -64,11 +73,13 @@ The script will:
 
 Reports are saved in the `results/` directory:
 
-**`results/errors.txt`** - Repositories with version mismatches (package installed but wrong version)
-- Lists repos where the package is found but doesn't match the target version
+**`results/exact_matches.txt`** - Repositories with exact package and version matches
+- Lists repos where both the package name and version match exactly
+- These are the primary findings matching your search criteria
 
-**`results/warnings.txt`** - Repositories with exact version matches (package installed with correct version)
-- Lists repos where the package is found and matches the target version exactly
+**`results/partial_matches.txt`** - Repositories with same package but different version
+- Lists repos where the package name matches but the version differs
+- These may be of interest depending on your use case
 
 Each report includes:
 - Repository name and URL
