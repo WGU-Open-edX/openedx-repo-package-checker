@@ -116,12 +116,49 @@ def get_repo_branches(org: str, repo_name: str) -> List[str]:
     return branches
 
 
-def check_package_json(org: str, repo_name: str, branch: str, target_packages: List[str]) -> Dict[str, List[str]]:
+def get_package_files_recursive(org: str, repo_name: str, branch: str) -> Dict[str, List[str]]:
+    """Get all package.json, package-lock.json, and yarn.lock files in the repository recursively."""
+    url = f"{GITHUB_API_BASE}/repos/{org}/{repo_name}/git/trees/{branch}"
+    params = {"recursive": "1"}
+
+    package_files = {
+        "package.json": [],
+        "package-lock.json": [],
+        "yarn.lock": []
+    }
+
+    try:
+        response = requests.get(url, params=params, headers=HEADERS, timeout=30)
+
+        if response.status_code != 200:
+            return package_files
+
+        tree_data = response.json()
+
+        if "tree" not in tree_data:
+            return package_files
+
+        for item in tree_data["tree"]:
+            path = item.get("path", "")
+            if path.endswith("/package.json") or path == "package.json":
+                package_files["package.json"].append(path)
+            elif path.endswith("/package-lock.json") or path == "package-lock.json":
+                package_files["package-lock.json"].append(path)
+            elif path.endswith("/yarn.lock") or path == "yarn.lock":
+                package_files["yarn.lock"].append(path)
+
+    except (requests.exceptions.Timeout, requests.exceptions.RequestException):
+        pass
+
+    return package_files
+
+
+def check_package_json(org: str, repo_name: str, branch: str, target_packages: List[str], file_path: str = "package.json") -> Dict[str, List[str]]:
     """Check package.json for target packages."""
     found_packages = {}
 
-    # Try to fetch package.json from root
-    url = f"https://raw.githubusercontent.com/{org}/{repo_name}/{branch}/package.json"
+    # Fetch package.json from specified path
+    url = f"https://raw.githubusercontent.com/{org}/{repo_name}/{branch}/{file_path}"
 
     try:
         response = requests.get(url, timeout=10)
@@ -163,7 +200,7 @@ def check_package_json(org: str, repo_name: str, branch: str, target_packages: L
                             "installed_version": installed_version,
                             "exact_match": exact_match,
                             "any_version_match": any_version_match,
-                            "source": "package.json"
+                            "source": f"{file_path}"
                         })
 
             except json.JSONDecodeError:
@@ -177,21 +214,77 @@ def check_package_json(org: str, repo_name: str, branch: str, target_packages: L
     return found_packages
 
 
-def check_lock_files(org: str, repo_name: str, branch: str, target_packages: List[str]) -> Dict[str, List[str]]:
-    """Check package-lock.json and yarn.lock for target packages."""
+def check_lock_file(org: str, repo_name: str, branch: str, target_packages: List[str], file_path: str, file_type: str) -> Dict[str, List[str]]:
+    """Check a lock file (package-lock.json or yarn.lock) for target packages."""
     found_packages = {}
 
-    # Check package-lock.json
-    package_lock_url = f"https://raw.githubusercontent.com/{org}/{repo_name}/{branch}/package-lock.json"
-    try:
-        response = requests.get(package_lock_url, timeout=10)
-        if response.status_code == 200:
-            try:
-                lock_data = response.json()
+    file_url = f"https://raw.githubusercontent.com/{org}/{repo_name}/{branch}/{file_path}"
 
-                # Check both lockfileVersion 1 and 2+ formats
-                packages = lock_data.get("packages", {})
-                dependencies = lock_data.get("dependencies", {})
+    if file_type == "package-lock.json":
+        try:
+            response = requests.get(file_url, timeout=10)
+            if response.status_code == 200:
+                try:
+                    lock_data = response.json()
+
+                    # Check both lockfileVersion 1 and 2+ formats
+                    packages = lock_data.get("packages", {})
+                    dependencies = lock_data.get("dependencies", {})
+
+                    for target_pkg in target_packages:
+                        # Handle both formats: color@5.0.1 and @scope/package@5.0.1
+                        if target_pkg.startswith("@"):
+                            # Scoped package: @scope/package@version
+                            parts = target_pkg.rsplit("@", 1)
+                            pkg_name = parts[0]
+                            pkg_version = parts[1]
+                        else:
+                            # Regular package: package@version
+                            pkg_name, pkg_version = target_pkg.rsplit("@", 1)
+
+                        # Check lockfileVersion 2+ format (packages)
+                        for pkg_path, pkg_info in packages.items():
+                            if pkg_path == f"node_modules/{pkg_name}" or pkg_path == pkg_name:
+                                installed_version = pkg_info.get("version", "")
+                                if installed_version:
+                                    exact_match = installed_version == pkg_version
+                                    any_version_match = True
+                                    if pkg_name not in found_packages:
+                                        found_packages[pkg_name] = []
+                                    found_packages[pkg_name].append({
+                                        "target_version": pkg_version,
+                                        "installed_version": installed_version,
+                                        "exact_match": exact_match,
+                                        "any_version_match": any_version_match,
+                                        "source": f"{file_path}"
+                                    })
+                                    break
+
+                        # Check lockfileVersion 1 format (dependencies)
+                        if pkg_name not in found_packages and pkg_name in dependencies:
+                            installed_version = dependencies[pkg_name].get("version", "")
+                            if installed_version:
+                                exact_match = installed_version == pkg_version
+                                any_version_match = True
+                                if pkg_name not in found_packages:
+                                    found_packages[pkg_name] = []
+                                found_packages[pkg_name].append({
+                                    "target_version": pkg_version,
+                                    "installed_version": installed_version,
+                                    "exact_match": exact_match,
+                                    "any_version_match": any_version_match,
+                                    "source": f"{file_path}"
+                                })
+                except json.JSONDecodeError:
+                    pass
+        except (requests.exceptions.Timeout, requests.exceptions.RequestException):
+            pass
+
+    elif file_type == "yarn.lock":
+        try:
+            response = requests.get(file_url, timeout=10)
+            if response.status_code == 200:
+                yarn_content = response.text
 
                 for target_pkg in target_packages:
                     # Handle both formats: color@5.0.1 and @scope/package@5.0.1
@@ -204,90 +297,34 @@ def check_lock_files(org: str, repo_name: str, branch: str, target_packages: Lis
                         # Regular package: package@version
                         pkg_name, pkg_version = target_pkg.rsplit("@", 1)
 
-                    # Check lockfileVersion 2+ format (packages)
-                    for pkg_path, pkg_info in packages.items():
-                        if pkg_path == f"node_modules/{pkg_name}" or pkg_path == pkg_name:
-                            installed_version = pkg_info.get("version", "")
-                            if installed_version:
-                                exact_match = installed_version == pkg_version
-                                any_version_match = True
-                                if pkg_name not in found_packages:
-                                    found_packages[pkg_name] = []
-                                found_packages[pkg_name].append({
-                                    "target_version": pkg_version,
-                                    "installed_version": installed_version,
-                                    "exact_match": exact_match,
-                                    "any_version_match": any_version_match,
-                                    "source": "package-lock.json"
-                                })
-                                break
-
-                    # Check lockfileVersion 1 format (dependencies)
-                    if pkg_name not in found_packages and pkg_name in dependencies:
-                        installed_version = dependencies[pkg_name].get("version", "")
-                        if installed_version:
-                            exact_match = installed_version == pkg_version
-                            any_version_match = True
-                            if pkg_name not in found_packages:
-                                found_packages[pkg_name] = []
-                            found_packages[pkg_name].append({
-                                "target_version": pkg_version,
-                                "installed_version": installed_version,
-                                "exact_match": exact_match,
-                                "any_version_match": any_version_match,
-                                "source": "package-lock.json"
-                            })
-            except json.JSONDecodeError:
-                pass
-    except (requests.exceptions.Timeout, requests.exceptions.RequestException):
-        pass
-
-    # Check yarn.lock
-    yarn_lock_url = f"https://raw.githubusercontent.com/{org}/{repo_name}/{branch}/yarn.lock"
-    try:
-        response = requests.get(yarn_lock_url, timeout=10)
-        if response.status_code == 200:
-            yarn_content = response.text
-
-            for target_pkg in target_packages:
-                # Handle both formats: color@5.0.1 and @scope/package@5.0.1
-                if target_pkg.startswith("@"):
-                    # Scoped package: @scope/package@version
-                    parts = target_pkg.rsplit("@", 1)
-                    pkg_name = parts[0]
-                    pkg_version = parts[1]
-                else:
-                    # Regular package: package@version
-                    pkg_name, pkg_version = target_pkg.rsplit("@", 1)
-
-                # Parse yarn.lock format (simplified parsing)
-                lines = yarn_content.split("\n")
-                i = 0
-                while i < len(lines):
-                    line = lines[i].strip()
-                    # Look for package declaration (e.g., "package-name@version:")
-                    if line.startswith(f'"{pkg_name}@') or line.startswith(f"{pkg_name}@"):
-                        # Next lines contain version info
-                        for j in range(i + 1, min(i + 10, len(lines))):
-                            version_line = lines[j].strip()
-                            if version_line.startswith("version "):
-                                installed_version = version_line.split("version ")[1].strip('"')
-                                exact_match = installed_version == pkg_version
-                                any_version_match = True
-                                if pkg_name not in found_packages:
-                                    found_packages[pkg_name] = []
-                                found_packages[pkg_name].append({
-                                    "target_version": pkg_version,
-                                    "installed_version": installed_version,
-                                    "exact_match": exact_match,
-                                    "any_version_match": any_version_match,
-                                    "source": "yarn.lock"
-                                })
-                                break
-                        break
-                    i += 1
-    except (requests.exceptions.Timeout, requests.exceptions.RequestException):
-        pass
+                    # Parse yarn.lock format (simplified parsing)
+                    lines = yarn_content.split("\n")
+                    i = 0
+                    while i < len(lines):
+                        line = lines[i].strip()
+                        # Look for package declaration (e.g., "package-name@version:")
+                        if line.startswith(f'"{pkg_name}@') or line.startswith(f"{pkg_name}@"):
+                            # Next lines contain version info
+                            for j in range(i + 1, min(i + 10, len(lines))):
+                                version_line = lines[j].strip()
+                                if version_line.startswith("version "):
+                                    installed_version = version_line.split("version ")[1].strip('"')
+                                    exact_match = installed_version == pkg_version
+                                    any_version_match = True
+                                    if pkg_name not in found_packages:
+                                        found_packages[pkg_name] = []
+                                    found_packages[pkg_name].append({
+                                        "target_version": pkg_version,
+                                        "installed_version": installed_version,
+                                        "exact_match": exact_match,
+                                        "any_version_match": any_version_match,
+                                        "source": f"{file_path}"
+                                    })
+                                    break
+                            break
+                        i += 1
+        except (requests.exceptions.Timeout, requests.exceptions.RequestException):
+            pass
 
     return found_packages
 
@@ -300,6 +337,7 @@ def main():
     parser.add_argument('--repo', type=str, help='Specific repository name to check (e.g., "edx-platform"). If not provided, checks all repositories.')
     parser.add_argument('--packages-file', type=str, help='Path to custom target packages file (default: target_packages.txt)')
     parser.add_argument('--branches-file', type=str, help='Path to custom target branches file (default: target_branches.txt)')
+    parser.add_argument('--recursive', action='store_true', help='Recursively search for package files in subdirectories (increases API calls)')
     args = parser.parse_args()
 
     # Load target packages and branches from specified files or defaults
@@ -381,21 +419,67 @@ def main():
         # Check each branch
         repo_found_packages = {}
         for branch in branches_to_check:
-            # Merge results from package.json and lock files
-            found_json = check_package_json(ORG_NAME, repo_name, branch, TARGET_PACKAGES)
-            found_lock = check_lock_files(ORG_NAME, repo_name, branch, TARGET_PACKAGES)
-
-            # Combine results
             found = {}
-            for pkg_name, versions in found_json.items():
-                if pkg_name not in found:
-                    found[pkg_name] = []
-                found[pkg_name].extend(versions)
 
-            for pkg_name, versions in found_lock.items():
-                if pkg_name not in found:
-                    found[pkg_name] = []
-                found[pkg_name].extend(versions)
+            if args.recursive:
+                # Get all package files in the repository
+                package_files = get_package_files_recursive(ORG_NAME, repo_name, branch)
+
+                # Show which files were found
+                total_files = len(package_files["package.json"]) + len(package_files["package-lock.json"]) + len(package_files["yarn.lock"])
+                if total_files > 0:
+                    print(f"  Found {total_files} package file(s) in repository:")
+                    for path in package_files["package.json"]:
+                        print(f"    - {path}")
+                    for path in package_files["package-lock.json"]:
+                        print(f"    - {path}")
+                    for path in package_files["yarn.lock"]:
+                        print(f"    - {path}")
+
+                # Check each package.json file
+                for pkg_json_path in package_files["package.json"]:
+                    found_json = check_package_json(ORG_NAME, repo_name, branch, TARGET_PACKAGES, pkg_json_path)
+                    for pkg_name, versions in found_json.items():
+                        if pkg_name not in found:
+                            found[pkg_name] = []
+                        found[pkg_name].extend(versions)
+
+                # Check each package-lock.json file
+                for lock_path in package_files["package-lock.json"]:
+                    found_lock = check_lock_file(ORG_NAME, repo_name, branch, TARGET_PACKAGES, lock_path, "package-lock.json")
+                    for pkg_name, versions in found_lock.items():
+                        if pkg_name not in found:
+                            found[pkg_name] = []
+                        found[pkg_name].extend(versions)
+
+                # Check each yarn.lock file
+                for yarn_path in package_files["yarn.lock"]:
+                    found_yarn = check_lock_file(ORG_NAME, repo_name, branch, TARGET_PACKAGES, yarn_path, "yarn.lock")
+                    for pkg_name, versions in found_yarn.items():
+                        if pkg_name not in found:
+                            found[pkg_name] = []
+                        found[pkg_name].extend(versions)
+            else:
+                # Only check root directory (default behavior)
+                found_json = check_package_json(ORG_NAME, repo_name, branch, TARGET_PACKAGES)
+                found_lock = check_lock_file(ORG_NAME, repo_name, branch, TARGET_PACKAGES, "package-lock.json", "package-lock.json")
+                found_yarn = check_lock_file(ORG_NAME, repo_name, branch, TARGET_PACKAGES, "yarn.lock", "yarn.lock")
+
+                # Combine results
+                for pkg_name, versions in found_json.items():
+                    if pkg_name not in found:
+                        found[pkg_name] = []
+                    found[pkg_name].extend(versions)
+
+                for pkg_name, versions in found_lock.items():
+                    if pkg_name not in found:
+                        found[pkg_name] = []
+                    found[pkg_name].extend(versions)
+
+                for pkg_name, versions in found_yarn.items():
+                    if pkg_name not in found:
+                        found[pkg_name] = []
+                    found[pkg_name].extend(versions)
 
             if found:
                 repo_found_packages[branch] = found

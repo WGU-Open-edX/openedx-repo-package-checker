@@ -67,6 +67,17 @@ python check_packages.py --branches-file custom_branches.txt
 python check_packages.py --org my-org --packages-file custom_packages.txt
 ```
 
+### Recursively search for nested package files:
+```bash
+# Search all subdirectories for package files (increases API usage)
+python check_packages.py --recursive
+
+# Combine with other options
+python check_packages.py --org my-org --recursive --packages-file custom.txt
+```
+
+**Note:** By default, the script only checks package files in the repository root (`/package.json`, `/package-lock.json`, `/yarn.lock`). Use `--recursive` to search for package files in all subdirectories (e.g., `/frontend/package.json`, `/backend/package.json`). This will increase API usage significantly for large repositories.
+
 ### Run Oct 2025 supply-chain-attacks-NPM-packages Check
 ```bash
 python check_packages.py --packages-file supply-chain-attacks-NPM-packages.txt
@@ -75,8 +86,10 @@ python check_packages.py --packages-file supply-chain-attacks-NPM-packages.txt
 The script will:
 1. Fetch repositories from the specified GitHub organization (all or specific repo)
 2. Check `package.json`, `package-lock.json`, and `yarn.lock` for the target packages
-3. Display results showing which repositories contain the packages and their versions
-4. Generate two report files
+   - By default: checks only the repository root
+   - With `--recursive`: searches all subdirectories (e.g., `/frontend/`, `/packages/`, etc.)
+3. Display results showing which repositories contain the packages, their versions, and file paths
+4. Generate two report files (exact matches and partial matches)
 
 ## Output
 
@@ -101,14 +114,39 @@ Reports are saved in the `results/` directory:
 Each report includes:
 - Repository name and URL
 - Branch name
-- Package name and source file (package.json, package-lock.json, or yarn.lock)
+- Package name and source file path (e.g., `package.json`, `frontend/package-lock.json`, `packages/common/yarn.lock`)
 - Target version
 - Installed version
+
+## Examples
+
+### Example: Check specific repo with recursive search
+```bash
+python check_packages.py --repo frontend-base --recursive
+```
+
+Output shows nested files:
+```
+Packages found:
+  ✗ @babel/core (package.json)
+    Target: 7.26.0
+    Installed: ^7.24.9
+  ✗ @babel/core (test-site/package-lock.json)
+    Target: 7.26.0
+    Installed: 7.27.4
+```
+
+### Example: Check all repos in custom organization
+```bash
+python check_packages.py --org my-company --packages-file vulnerable-packages.txt
+```
 
 ## Features
 
 - ✅ Supports public and private repositories (with appropriate GitHub token)
 - ✅ Checks multiple file types: `package.json`, `package-lock.json`, and `yarn.lock`
+- ✅ Recursive search for nested package files in subdirectories (optional)
 - ✅ Handles scoped packages (e.g., `@scope/package@version`)
 - ✅ Configurable organization, packages, and branches
 - ✅ Generates detailed reports with exact and partial matches
+- ✅ Reports show file paths for easy location of matches
