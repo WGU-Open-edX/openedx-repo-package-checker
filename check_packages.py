@@ -75,34 +75,56 @@ class GitHubClient:
             self.headers["Authorization"] = f"token {token}"
     
     def get_all_repos(self, org: str) -> List[Dict]:
-        """Fetch all repositories for an organization."""
+        """Fetch all repositories for an organization or user."""
         repos = []
         page = 1
         per_page = 100
-        
+
         print(f"Fetching repositories from {org}...")
-        
+
+        # Determine if this is a user or organization
+        account_type = self._get_account_type(org)
+
+        if account_type == "User":
+            base_path = f"/users/{org}/repos"
+        else:
+            base_path = f"/orgs/{org}/repos"
+
         while True:
-            url = f"{self.base_url}/orgs/{org}/repos"
+            url = f"{self.base_url}{base_path}"
             params = {"page": page, "per_page": per_page, "type": "all"}
-            
+
             response = requests.get(url, params=params, headers=self.headers)
-            
+
             if response.status_code != 200:
                 print(f"Error fetching repos: {response.status_code}")
                 print(response.text)
                 break
-            
+
             page_repos = response.json()
             if not page_repos:
                 break
-            
+
             repos.extend(page_repos)
             page += 1
             print(f"Fetched {len(repos)} repositories so far...")
-        
+
         print(f"Total repositories found: {len(repos)}\n")
         return repos
+
+    def _get_account_type(self, account: str) -> str:
+        """Determine if an account is a User or Organization."""
+        url = f"{self.base_url}/users/{account}"
+        response = requests.get(url, headers=self.headers)
+
+        if response.status_code == 200:
+            account_data = response.json()
+            account_type = account_data.get("type", "Organization")
+            print(f"Detected account type: {account_type}")
+            return account_type
+
+        # Default to Organization if we can't determine
+        return "Organization"
     
     def get_repo(self, org: str, repo_name: str) -> Optional[Dict]:
         """Fetch a single repository."""

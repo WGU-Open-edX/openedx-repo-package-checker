@@ -45,10 +45,16 @@ To create a token:
 python check_packages.py
 ```
 
-### Check a specific organization:
+### Check a specific organization or user:
 ```bash
+# Check an organization
 python check_packages.py --org my-organization
+
+# Check a user's repositories (e.g., for checking forks)
+python check_packages.py --org github-username
 ```
+
+**Note:** The `--org` flag works for both GitHub organizations and individual user accounts. The script automatically detects the account type and uses the appropriate API endpoint.
 
 ### Check a specific repository:
 ```bash
@@ -77,11 +83,6 @@ python check_packages.py --org my-org --recursive --packages-file custom.txt
 ```
 
 **Note:** By default, the script only checks package files in the repository root (`/package.json`, `/package-lock.json`, `/yarn.lock`). Use `--recursive` to search for package files in all subdirectories (e.g., `/frontend/package.json`, `/backend/package.json`). This will increase API usage significantly for large repositories.
-
-### Run Oct 2025 supply-chain-attacks-NPM-packages Check
-```bash
-python check_packages.py --packages-file supply-chain-attacks-NPM-packages.txt
-```
 
 The script will:
 1. Fetch repositories from the specified GitHub organization (all or specific repo)
@@ -141,12 +142,19 @@ Packages found:
 python check_packages.py --org my-company --packages-file vulnerable-packages.txt
 ```
 
+### Example: Check your fork repositories
+```bash
+python check_packages.py --org your-github-username
+```
+
 ## Features
 
 - ✅ Supports public and private repositories (with appropriate GitHub token)
+- ✅ Works with both GitHub organizations and user accounts
+- ✅ Automatically detects account type (user vs organization)
 - ✅ Checks multiple file types: `package.json`, `package-lock.json`, and `yarn.lock`
 - ✅ Recursive search for nested package files in subdirectories (optional)
 - ✅ Handles scoped packages (e.g., `@scope/package@version`)
-- ✅ Configurable organization, packages, and branches
+- ✅ Configurable organization/user, packages, and branches
 - ✅ Generates detailed reports with exact and partial matches
 - ✅ Reports show file paths for easy location of matches
